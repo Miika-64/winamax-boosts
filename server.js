@@ -22,21 +22,30 @@ function sportName(id) { return SPORT_NAMES[id] || 'Sport ' + id; }
 function buildBoosts(state) {
   const results = [];
   for (const [mid, match] of Object.entries(state.matches)) {
-    const eq1 = match.competitor1Name || match.homeTeamName || match.home || match.team1 || match.name || String(mid);
-    const eq2 = match.competitor2Name || match.awayTeamName || match.away || match.team2 || '';
-    const sportId = match.sportId || match.sport_id || 100000;
-    const tournamentId = match.tournamentId || match.tournament_id || '';
-    const matchStart = match.matchStart || match.startDate || match.date || null;
+    // match.title = "Cote Boostée : Team1 - Team2"
+    const rawTitle = match.title || '';
+    const matchTitle = rawTitle.replace(/^Cote Boost\u00e9e\s*:\s*/i, '').replace(/^Cote Boostee\s*:\s*/i, '').trim();
+    const parts = matchTitle.split(' - ');
+    const eq1 = parts[0]?.trim() || rawTitle || String(mid);
+    const eq2 = parts.slice(1).join(' - ').trim();
+    const sportId = match.sportId || 100000;
+    const tournamentId = match.tournamentId || '';
+    const matchStart = match.matchStart || null;
     const league = (state.tournaments[tournamentId] || {}).tournamentName || (state.tournaments[tournamentId] || {}).name || '';
+
     for (const [bid, bet] of Object.entries(state.bets)) {
-      const betMatchId = bet.matchId || bet.match_id || bet.eventId || bet.event_id || bet.matchTypeId || '';
-      if (String(betMatchId) !== String(mid)) continue;
-      const outcomes = bet.outcomes || bet.outcomeIds || bet.selections || [];
+      if (String(bet.matchId || '') !== String(mid)) continue;
+      const outcomes = bet.outcomes || [];
       if (!outcomes.length) continue;
       const coteVal = state.odds[outcomes[0]];
       if (!coteVal) continue;
-      const coteInit = bet.initialOdds || bet.baseOdds || bet.originalOdds || null;
-      const miseMax  = bet.maxBet || bet.stakeLimit || bet.maxStake || null;
+      // bet.previousOdd = cote initiale avant boost
+      const coteInit = bet.previousOdd || null;
+      // mise max depuis betTypeHelp "20 € maximum" ou betTitle "mise max 20 €"
+      const helpText = bet.betTypeHelp || bet.betTitle || '';
+      const miseMatch = helpText.match(/(\d+)\s*\u20ac\s*max/i) || helpText.match(/max(?:imum)?\s*(\d+)\s*\u20ac/i) || helpText.match(/mise\s*max\s*(\d+)/i);
+      const miseMax = miseMatch ? parseInt(miseMatch[1]) : null;
+
       results.push({
         id: bid,
         sport: sportName(sportId),
@@ -44,7 +53,7 @@ function buildBoosts(state) {
         equipe1: eq1,
         equipe2: eq2,
         heureMatch: matchStart ? new Date(matchStart * 1000).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }) : null,
-        libelle: bet.label || bet.betTitle || bet.name || bet.title || '',
+        libelle: bet.betTitle || bet.betTypeName || '',
         coteBoostee: coteVal,
         coteInitiale: coteInit,
         miseMax,
@@ -133,23 +142,8 @@ async function fetchWinamaxBoosts() {
   }
 
   const boosts = buildBoosts(state);
-
-  const sampleMatch = Object.values(state.matches)[0] || null;
-  const sampleBet   = Object.values(state.bets)[0]   || null;
-  if (sampleMatch) console.log('[DEBUG] Match keys:', Object.keys(sampleMatch).join(', '));
-  if (sampleBet)   console.log('[DEBUG] Bet keys:', Object.keys(sampleBet).join(', '));
-
-  const debug = {
-    matchCount: Object.keys(state.matches).length,
-    betCount: Object.keys(state.bets).length,
-    oddsCount: Object.keys(state.odds).length,
-    sampleMatchKeys: sampleMatch ? Object.keys(sampleMatch) : [],
-    sampleBetKeys: sampleBet ? Object.keys(sampleBet) : [],
-    sampleMatch,
-    sampleBet,
-  };
-  console.log('[Winamax]', boosts.length, 'cotes boostees');
-  return { boosts, _debug: debug };
+  console.log('[Winamax]', boosts.length, 'cotes boostees |', Object.keys(state.matches).length, 'matchs |', Object.keys(state.odds).length, 'odds');
+  return { boosts, count: boosts.length };
 }
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
@@ -158,7 +152,7 @@ app.get('/boosts', async (_req, res) => {
   console.log('[API] GET /boosts');
   try {
     const result = await fetchWinamaxBoosts();
-    res.json({ success: true, count: result.boosts.length, boosts: result.boosts, _debug: result._debug });
+    res.json({ success: true, count: result.boosts.length, boosts: result.boosts });
   } catch (err) {
     console.error('[API] Erreur:', err.message);
     res.status(500).json({ success: false, error: err.message });

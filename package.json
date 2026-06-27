@@ -1,0 +1,16 @@
+{
+  "name": "winamax-boosts",
+  "version": "1.0.0",
+  "description": "Microservice exposant les cotes boostees Winamax via GET /boosts",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.16.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

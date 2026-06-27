@@ -50,7 +50,7 @@ function buildBoosts(state) {
     }
 
     for (const [bid, bet] of Object.entries(state.bets)) {
-      if (String(bet.matchId || '') !== String(mid)) continue;
+      if (!bet || String(bet.matchId || '') !== String(mid)) continue;
       const outcomes = bet.outcomes || [];
       if (!outcomes.length) continue;
       const coteVal = state.odds[outcomes[0]];

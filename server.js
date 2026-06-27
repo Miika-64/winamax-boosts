@@ -22,16 +22,20 @@ function sportName(id) { return SPORT_NAMES[id] || 'Sport ' + id; }
 function buildBoosts(state) {
   const results = [];
   for (const [mid, match] of Object.entries(state.matches)) {
-    const { competitor1Name: eq1, competitor2Name: eq2, sportId, tournamentId, matchStart } = match;
-    if (!eq1 || !eq2) continue;
-    const league = (state.tournaments[tournamentId] || {}).tournamentName || '';
+    const eq1 = match.competitor1Name || match.homeTeamName || match.home || match.team1 || match.name || String(mid);
+    const eq2 = match.competitor2Name || match.awayTeamName || match.away || match.team2 || '';
+    const sportId = match.sportId || match.sport_id || 100000;
+    const tournamentId = match.tournamentId || match.tournament_id || '';
+    const matchStart = match.matchStart || match.startDate || match.date || null;
+    const league = (state.tournaments[tournamentId] || {}).tournamentName || (state.tournaments[tournamentId] || {}).name || '';
     for (const [bid, bet] of Object.entries(state.bets)) {
-      if (String(bet.matchId) !== String(mid)) continue;
-      const outcomes = bet.outcomes || [];
+      const betMatchId = bet.matchId || bet.match_id || bet.eventId || bet.event_id || bet.matchTypeId || '';
+      if (String(betMatchId) !== String(mid)) continue;
+      const outcomes = bet.outcomes || bet.outcomeIds || bet.selections || [];
       if (!outcomes.length) continue;
       const coteVal = state.odds[outcomes[0]];
       if (!coteVal) continue;
-      const coteInit = bet.initialOdds || bet.baseOdds || null;
+      const coteInit = bet.initialOdds || bet.baseOdds || bet.originalOdds || null;
       const miseMax  = bet.maxBet || bet.stakeLimit || bet.maxStake || null;
       results.push({
         id: bid,
@@ -40,11 +44,11 @@ function buildBoosts(state) {
         equipe1: eq1,
         equipe2: eq2,
         heureMatch: matchStart ? new Date(matchStart * 1000).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }) : null,
-        libelle: bet.label || bet.betTitle || bet.name || '',
+        libelle: bet.label || bet.betTitle || bet.name || bet.title || '',
         coteBoostee: coteVal,
         coteInitiale: coteInit,
         miseMax,
-        url: 'https://www.winamax.fr/paris-sportifs/sports/' + (sportId || 100000),
+        url: 'https://www.winamax.fr/paris-sportifs/sports/' + sportId,
       });
     }
   }
@@ -58,7 +62,6 @@ function parsePackets(text) {
 async function fetchWinamaxBoosts() {
   const state = { matches: {}, bets: {}, odds: {}, tournaments: {} };
 
-  // Step 1: handshake — get SID + session cookies
   const initUrl = SIO_HTTP + '?EIO=4&transport=polling&' + SIO_Q + '&t=' + Date.now();
   const initRes = await fetch(initUrl, { headers: BROWSER_HEADERS });
   if (!initRes.ok) throw new Error('Handshake HTTP ' + initRes.status);
@@ -66,7 +69,6 @@ async function fetchWinamaxBoosts() {
   if (!initText.startsWith('0')) throw new Error('Reponse inattendue: ' + initText.slice(0, 120));
   const sid = JSON.parse(initText.slice(1)).sid;
 
-  // Capture cookies from handshake and forward to all subsequent requests
   const setCookies = (initRes.headers.getSetCookie ? initRes.headers.getSetCookie() : []);
   const cookieStr  = [
     'wm_cookie_policy=1',
@@ -79,19 +81,16 @@ async function fetchWinamaxBoosts() {
 
   console.log('[Winamax] SID:', sid);
 
-  // Step 2: namespace connect (POST "40")
   await fetch(pollBase, {
     method: 'POST',
     headers: { ...sessionHeaders, 'Content-Type': 'text/plain;charset=UTF-8' },
     body: '40',
   });
 
-  // Step 3: flush GET (receive "40" namespace connect confirmation)
   const flushRes  = await fetch(pollBase + '&t=' + Date.now(), { headers: sessionHeaders });
   const flushText = await flushRes.text();
   console.log('[Winamax] NS confirm:', flushText.slice(0, 80));
 
-  // Step 4: subscribe to boost routes
   const subPackets = BOOST_ROUTES.map(route =>
     '42' + JSON.stringify(['m', { route, requestId: Date.now() + '_' + route }])
   ).join('\x1e');
@@ -104,7 +103,6 @@ async function fetchWinamaxBoosts() {
 
   BOOST_ROUTES.forEach(r => console.log('[Winamax] Abonne:', r));
 
-  // Step 5: polling loop for COLLECT_MS
   const endTime = Date.now() + COLLECT_MS;
 
   while (Date.now() < endTime) {
@@ -135,8 +133,22 @@ async function fetchWinamaxBoosts() {
   }
 
   const boosts = buildBoosts(state);
-  const debug  = { matchCount: Object.keys(state.matches).length, betCount: Object.keys(state.bets).length };
-  console.log('[Winamax]', boosts.length, 'cotes boostees', debug);
+
+  const sampleMatch = Object.values(state.matches)[0] || null;
+  const sampleBet   = Object.values(state.bets)[0]   || null;
+  if (sampleMatch) console.log('[DEBUG] Match keys:', Object.keys(sampleMatch).join(', '));
+  if (sampleBet)   console.log('[DEBUG] Bet keys:', Object.keys(sampleBet).join(', '));
+
+  const debug = {
+    matchCount: Object.keys(state.matches).length,
+    betCount: Object.keys(state.bets).length,
+    oddsCount: Object.keys(state.odds).length,
+    sampleMatchKeys: sampleMatch ? Object.keys(sampleMatch) : [],
+    sampleBetKeys: sampleBet ? Object.keys(sampleBet) : [],
+    sampleMatch,
+    sampleBet,
+  };
+  console.log('[Winamax]', boosts.length, 'cotes boostees');
   return { boosts, _debug: debug };
 }
 

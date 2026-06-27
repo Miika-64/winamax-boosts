@@ -16,13 +16,19 @@ const BROWSER_HEADERS = {
 const COLLECT_MS   = parseInt(process.env.COLLECT_MS || '10000');
 const BOOST_ROUTES = (process.env.BOOST_ROUTES || 'sport:100000').split(',');
 
+// Filtrer par tournoi: ex. "mondial,world cup,coupe du monde"
+// Laisser vide pour tout afficher
+const TOURNAMENT_FILTER = (process.env.TOURNAMENT_FILTER || 'mondial,world cup,coupe du monde,fifa world')
+  .toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+
 const SPORT_NAMES = { 1:'Football', 2:'Basketball', 4:'Hockey sur Glace', 5:'Tennis', 100000:'Extras' };
 function sportName(id) { return SPORT_NAMES[id] || 'Sport ' + id; }
 
 function buildBoosts(state) {
   const results = [];
+  const nowSec = Math.floor(Date.now() / 1000);
+
   for (const [mid, match] of Object.entries(state.matches)) {
-    // match.title = "Cote Boostée : Team1 - Team2"
     const rawTitle = match.title || '';
     const matchTitle = rawTitle.replace(/^Cote Boost\u00e9e\s*:\s*/i, '').replace(/^Cote Boostee\s*:\s*/i, '').trim();
     const parts = matchTitle.split(' - ');
@@ -33,15 +39,23 @@ function buildBoosts(state) {
     const matchStart = match.matchStart || null;
     const league = (state.tournaments[tournamentId] || {}).tournamentName || (state.tournaments[tournamentId] || {}).name || '';
 
+    // Filtre 1: matchs a venir uniquement (pas deja commences)
+    if (matchStart && matchStart < nowSec) continue;
+
+    // Filtre 2: tournoi specifique (Mondial par defaut)
+    if (TOURNAMENT_FILTER.length > 0) {
+      const leagueLower = league.toLowerCase();
+      const ok = TOURNAMENT_FILTER.some(kw => leagueLower.includes(kw));
+      if (!ok) continue;
+    }
+
     for (const [bid, bet] of Object.entries(state.bets)) {
       if (String(bet.matchId || '') !== String(mid)) continue;
       const outcomes = bet.outcomes || [];
       if (!outcomes.length) continue;
       const coteVal = state.odds[outcomes[0]];
       if (!coteVal) continue;
-      // bet.previousOdd = cote initiale avant boost
       const coteInit = bet.previousOdd || null;
-      // mise max depuis betTypeHelp "20 € maximum" ou betTitle "mise max 20 €"
       const helpText = bet.betTypeHelp || bet.betTitle || '';
       const miseMatch = helpText.match(/(\d+)\s*\u20ac\s*max/i) || helpText.match(/max(?:imum)?\s*(\d+)\s*\u20ac/i) || helpText.match(/mise\s*max\s*(\d+)/i);
       const miseMax = miseMatch ? parseInt(miseMatch[1]) : null;
@@ -57,7 +71,6 @@ function buildBoosts(state) {
         coteBoostee: coteVal,
         coteInitiale: coteInit,
         miseMax,
-        url: 'https://www.winamax.fr/paris-sportifs/sports/' + sportId,
       });
     }
   }
@@ -142,7 +155,7 @@ async function fetchWinamaxBoosts() {
   }
 
   const boosts = buildBoosts(state);
-  console.log('[Winamax]', boosts.length, 'cotes boostees |', Object.keys(state.matches).length, 'matchs |', Object.keys(state.odds).length, 'odds');
+  console.log('[Winamax]', boosts.length, 'cotes boostees Mondial |', Object.keys(state.matches).length, 'matchs total');
   return { boosts, count: boosts.length };
 }
 
@@ -162,4 +175,5 @@ app.get('/boosts', async (_req, res) => {
 app.listen(PORT, () => {
   console.log('Winamax boosts server (HTTP polling) — port ' + PORT);
   console.log('Routes: ' + BOOST_ROUTES.join(', '));
+  console.log('Filtre tournoi:', TOURNAMENT_FILTER.join(', ') || 'aucun');
 });
